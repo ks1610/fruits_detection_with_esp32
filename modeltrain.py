@@ -1,7 +1,9 @@
 import tensorflow as tf
+import matplotlib.pyplot as plt
+
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.applications import MobileNet
-from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
+from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Dropout
 from tensorflow.keras.models import Model
 import numpy as np
 
@@ -10,33 +12,38 @@ IMG_SIZE = 96
 BATCH_SIZE = 32
 DATA_PATH = 'fruits'
 
-# Chuẩn hóa giá trị pixel về [0, 1]
-datagen = ImageDataGenerator(rescale=1./255)
+# 1. TỐI ƯU: TÁCH RIÊNG BỘ SINH DỮ LIỆU VÀ THÊM DATA AUGMENTATION CHO TẬP TRAIN
+train_datagen = ImageDataGenerator(
+    rescale=1./255,
+    rotation_range=30,      # Xoay ảnh ngẫu nhiên tối đa 30 độ
+    width_shift_range=0.2,  # Dịch chuyển ảnh ngang
+    height_shift_range=0.2, # Dịch chuyển ảnh dọc
+    zoom_range=0.2,         # Phóng to/thu nhỏ ngẫu nhiên
+    horizontal_flip=True,   # Lật ngang ảnh
+    fill_mode='nearest'     # Điền bù các pixel bị khuyết khi xoay/dịch
+)
 
-train_gen = datagen.flow_from_directory(
+# Tập Val và Test tuyệt đối KHÔNG được Augmentation, chỉ Rescale để đánh giá công bằng
+val_test_datagen = ImageDataGenerator(rescale=1./255)
+
+train_gen = train_datagen.flow_from_directory(
     f'{DATA_PATH}/train',
     target_size=(IMG_SIZE, IMG_SIZE),
     batch_size=BATCH_SIZE,
     class_mode='categorical'
 )
 
-val_gen = datagen.flow_from_directory(
+val_gen = val_test_datagen.flow_from_directory(
     f'{DATA_PATH}/val',
     target_size=(IMG_SIZE, IMG_SIZE),
     batch_size=BATCH_SIZE,
     class_mode='categorical'
 )
 
-# Test gen cho bước đánh giá
-test_gen = datagen.flow_from_directory(
-    f'{DATA_PATH}/test',
-    target_size=(IMG_SIZE, IMG_SIZE),
-    batch_size=BATCH_SIZE,
-    class_mode='categorical',
-    shuffle=False
-)
+NUM_CLASSES = train_gen.num_classes
+print(f"Số lượng nhãn nhận diện: {NUM_CLASSES} - Tên nhãn: {train_gen.class_indices}")
 
-# Tải MobileNetV1 (bỏ lớp Output mặc định)
+# Tải MobileNetV1
 base_model = MobileNet(
     weights='imagenet', 
     include_top=False, 
@@ -44,27 +51,60 @@ base_model = MobileNet(
     alpha=0.25
 )
 
-# Đóng băng các lớp cơ sở (Transfer Learning)
 base_model.trainable = False
 
-# Xây dựng phần phân loại cho 4 loại quả
 x = base_model.output
 x = GlobalAveragePooling2D()(x)
 x = Dense(64, activation='relu')(x)
-predictions = Dense(4, activation='softmax')(x) # 4 lớp: apple, banana, orange, pineapple
+x = Dropout(0.5)(x) 
+predictions = Dense(NUM_CLASSES, activation='softmax')(x) 
 
 model = Model(inputs=base_model.input, outputs=predictions)
 
-# Biên dịch mô hình
 model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 
-# Bắt đầu huấn luyện
 print("Bắt đầu huấn luyện...")
 history = model.fit(
     train_gen, 
     validation_data=val_gen, 
-    epochs=15
+    epochs=50 
 )
+
+# Lấy dữ liệu từ biến history
+acc = history.history['accuracy']
+val_acc = history.history['val_accuracy']
+loss = history.history['loss']
+val_loss = history.history['val_loss']
+epochs_range = range(1, len(acc) + 1)
+
+# Tạo khung hình vẽ (kích thước 12x5 inch)
+plt.figure(figsize=(12, 5))
+
+# 1. Biểu đồ Accuracy (Độ chính xác)
+plt.subplot(1, 2, 1)
+plt.plot(epochs_range, acc, 'b-', label='Độ chính xác (Train)', linewidth=2)
+plt.plot(epochs_range, val_acc, 'r--', label='Độ chính xác (Validation)', linewidth=2)
+plt.title('Độ chính xác qua các Epochs')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.legend(loc='lower right')
+plt.grid(True, linestyle='--', alpha=0.6)
+
+# 2. Biểu đồ Loss (Hàm mất mát)
+plt.subplot(1, 2, 2)
+plt.plot(epochs_range, loss, 'b-', label='Mất mát (Train)', linewidth=2)
+plt.plot(epochs_range, val_loss, 'r--', label='Mất mát (Validation)', linewidth=2)
+plt.title('Hàm mất mát qua các Epochs')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.legend(loc='upper right')
+plt.grid(True, linestyle='--', alpha=0.6)
+
+# Căn chỉnh và lưu/hiển thị biểu đồ
+plt.tight_layout()
+plt.savefig('training_history.png') # Lưu ảnh ra file
+# plt.show() # Hiển thị ảnh trên màn hình
+# ---------------------------------------
 
 # Tạo hàm sinh dữ liệu đại diện để TFLite biết phạm vi phân bố dữ liệu mà lượng tử hóa
 def representative_data_gen():
