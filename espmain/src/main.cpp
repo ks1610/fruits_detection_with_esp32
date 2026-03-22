@@ -24,7 +24,7 @@ tflite::MicroInterpreter* interpreter = nullptr;
 TfLiteTensor* input = nullptr;
 TfLiteTensor* output = nullptr;
 
-const char* CLASSES[] = {"Apple", "Banana", "Orange", "Pineapple"};
+const char* CLASSES[] = {"Táo", "Chuối", "Cam", "Dứa"};
 
 // Biến toàn cục đếm số lượng byte ảnh đã truyền thẳng vào AI
 int received_bytes = 0; 
@@ -148,9 +148,23 @@ void handleInference() {
     }
   }
 
+  //check confidence level
+  float confidence = (max_val + 128.0) / 256.0 * 100.0;
+  Serial.print("Độ chính xác: ");
+  Serial.print(confidence);
+  Serial.println("%");
+  String result_str = "";
+  float THRESHOLD = 65.0;
+  
+  if (confidence < THRESHOLD) {
+    result_str = "Vật thể lạ / Không rõ (" + String(confidence, 1) + "%)";
+  } else {
+    result_str = String(CLASSES[max_idx]) + " (" + String(confidence, 1) + "%)";
+  }
+
   Serial.print("Hoàn thành! Kết quả: ");
-  Serial.println(CLASSES[max_idx]);
-  server.send(200, "text/plain", CLASSES[max_idx]);
+  Serial.println(result_str);
+  server.send(200, "text/plain", result_str);
 }
 
 void setup() {
